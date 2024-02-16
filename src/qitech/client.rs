@@ -285,16 +285,11 @@ mod tests {
 
     #[test]
     fn can_encode_json_body() {
-        let client = create_client(BASE_URL.into());
-        let request = client
-            .get_request(Method::GET, TEST_ENDPOINT)
-            .json(TEST_JSON_BODY);
-        let request = request.build().unwrap();
+        let pkey = PKey::private_key_from_pem(TEST_ESKEY.as_bytes()).unwrap();
+
         // return a authorized request
-        let (encoded_body, md5_hash) = QiTechClient::encode_body(
-            client.private_key.clone(),
-            request.body().expect("This test should have a body"),
-        );
+        let (encoded_body, md5_hash) =
+            QiTechClient::encode_body(pkey, &TEST_JSON_BODY.to_string().into());
 
         assert_gt!(encoded_body.len(), 0);
         assert_gt!(md5_hash.len(), 0);
@@ -314,27 +309,22 @@ mod tests {
         assert_eq!(decoded_body, TEST_JSON_BODY);
     }
 
+    #[test]
     fn can_encode_headers() {
-        let client = create_client(BASE_URL.into());
-        let request = client
-            .get_request(Method::GET, TEST_ENDPOINT)
-            .json(TEST_JSON_BODY);
-        let request = request.build().unwrap();
+        let pkey = PKey::private_key_from_pem(TEST_ESKEY.as_bytes()).unwrap();
+
         // return a authorized request
-        let (encoded_body, md5_hash) = QiTechClient::encode_body(
-            client.private_key.clone(),
-            request.body().expect("This test should have a body"),
-        );
+        let (encoded_body, md5_hash) =
+            QiTechClient::encode_body(pkey, &TEST_JSON_BODY.to_string().into());
 
         assert_gt!(encoded_body.len(), 0);
         assert_gt!(md5_hash.len(), 0);
-    }
-
-    fn decoded_body_is_valid() {
+        // TODO: Validate that the headers are correct
         todo!()
     }
 
-    fn decoded_headers_is_valid() {
+    #[test]
+    fn can_decode_headers() {
         todo!()
     }
 }
