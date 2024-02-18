@@ -1,10 +1,24 @@
-#![allow(dead_code)]
-
 mod client;
+mod models;
 
+pub use models::*;
+
+use reqwest::StatusCode;
 use secrecy::Secret;
 
-use self::client::{Method, QiTechClient, Response};
+use self::client::{ClientError, Method, QiTechClient};
+
+use serde::Deserialize;
+use serde::Serialize;
+
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProviderStandardError {
+    code: String,
+    description: String,
+    title: String,
+    translation: String,
+}
 
 pub struct QiTechProvider {
     client: QiTechClient,
@@ -27,27 +41,55 @@ impl QiTechProvider {
         );
         Self { client }
     }
+}
 
-    pub async fn ask_for_balance(&self, _data: String) -> Result<Response, reqwest::Error> {
+impl QiTechProvider {
+    pub async fn ask_for_balance(
+        &self,
+        data: AskBalanceRequest,
+    ) -> Result<serde_json::Value, ProviderError> {
         let client = &self.client;
         let request = client
-            .get_request(Method::POST, "/fgts/balance")
-            .json(r#"{"document_number": "05577889944"}"#);
-        client.execute_request(request).await
+            .get_request(Method::POST, "/baas/v2/fgts/available_balance")
+            .json(&data);
+        let response = client.execute_request(request).await?;
+        // println!("{:?}", &response);
+
+        let body = match response.status() {
+            StatusCode::OK => {
+                let body = response.json::<serde_json::Value>().await;
+                body.map_err(|e| ProviderError::ResponseParse(e.to_string()))
+            }
+            StatusCode::UNAUTHORIZED | StatusCode::BAD_REQUEST => {
+                let body = response.json::<serde_json::Value>().await;
+                body.map_err(|e| ProviderError::ResponseParse(e.to_string()))
+            }
+            _ => todo!(),
+        }?;
+        Ok(body)
     }
 }
 
-enum QiTechServiceError {
-    JWTGeneration(String),
+#[derive(thiserror::Error, Debug)]
+pub enum ProviderError {
+    #[error("The provider returned an error {0}")]
+    Provider(serde_json::Value),
+    #[error("The response could not be parsed successfully")]
+    ResponseParse(String),
+    #[error(transparent)]
+    Client(#[from] ClientError),
 }
 
 #[cfg(test)]
 mod tests {
+    use self::client::tests::create_client;
+    use self::client::Response;
+
     use super::*;
     use claims::assert_ok;
     // use fake::{Fake, Faker};
     use secrecy::Secret;
-    use wiremock::matchers::any;
+    use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     pub const TEST_ESKEY: &str = r#"-----BEGIN EC PRIVATE KEY-----
@@ -67,14 +109,14 @@ ouLhoDfFOvahvvzuij7hhNWmWMIBfDO0LXQfKBlpGKVgTUC0TwnWa5dzUNJoX0b/
 "#;
 
     impl QiTechProvider {
-        pub async fn get_test(&self) -> Result<Response, reqwest::Error> {
+        pub async fn get_test(&self) -> Result<Response, ClientError> {
             let client = &self.client;
             let endpoint = format!("/test/{}", std::env!("QI_API_KEY"));
             let request = client.get_request(Method::GET, &endpoint);
             client.execute_request(request).await
         }
 
-        pub async fn post_test(&self) -> Result<Response, reqwest::Error> {
+        pub async fn post_test(&self) -> Result<Response, ClientError> {
             let client = &self.client;
             let endpoint = format!("/test/{}", std::env!("QI_API_KEY"));
             let request = client.get_request(Method::POST, &endpoint);
@@ -101,7 +143,7 @@ ouLhoDfFOvahvvzuij7hhNWmWMIBfDO0LXQfKBlpGKVgTUC0TwnWa5dzUNJoX0b/
     async fn get_test_returns_200() {
         let mock_server = MockServer::start().await;
         let client = create_provider(mock_server.uri());
-        Mock::given(any())
+        Mock::given(method("GET"))
             .respond_with(ResponseTemplate::new(200))
             .expect(1)
             .mount(&mock_server)
@@ -111,19 +153,33 @@ ouLhoDfFOvahvvzuij7hhNWmWMIBfDO0LXQfKBlpGKVgTUC0TwnWa5dzUNJoX0b/
         assert_ok!(response);
     }
 
-    pub fn create_client(base_url: String) -> QiTechClient {
-        let api_key = Secret::new(std::env!("QI_API_KEY").to_string());
+    #[tokio::test]
+    async fn ask_for_balance_requests_has_a_valid_request_body() {
+        todo!()
+    }
 
-        let client_private_key = Secret::new(TEST_ESKEY.to_string());
-        let provider_public_key = std::env!("QI_PUBLIC_KEY").to_string();
-
-        QiTechClient::new(
-            base_url,
-            api_key,
-            client_private_key,
-            None,
-            provider_public_key,
-        )
+    #[tokio::test]
+    async fn ask_for_balance_returns_200() {
+        let body = r#"{"document_number": "05577889944"}"#;
+        let body = serde_json::from_str::<AskBalanceRequest>(body).unwrap();
+        let mock_server = MockServer::start().await;
+        let provider = create_provider(mock_server.uri());
+        Mock::given(method("POST"))
+            .and(path("/baas/v2/fgts/available_balance"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "available_balance_key": "7521981f-0b06-43d2-9a75-d3a1f215fbbf",
+                "document_number": "06568225037",
+                "status": "pending",
+                "status_events": [{
+                    "event_datetime": "2022-12-26T13:36:16",
+                    "status": "pending"
+                }]
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+        let response = provider.ask_for_balance(body).await;
+        assert_ok!(response);
     }
 
     fn create_provider(base_url: String) -> QiTechProvider {

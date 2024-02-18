@@ -1,19 +1,29 @@
 mod qitech;
 
+use eyre::Result;
 use lambda_http::{run, service_fn, Body, Error, Request, RequestExt, Response};
+use qitech::{AskBalanceRequest, QiTechProvider};
 use tracing_subscriber::filter::{EnvFilter, LevelFilter};
 
 /// This is the main body for the function.
 /// Write your code inside it.
 /// There are some code example in the following URLs:
 /// - https://github.com/awslabs/aws-lambda-rust-runtime/tree/main/examples
-async fn function_handler(event: Request) -> Result<Response<Body>, Error> {
+async fn function_handler(event: Request) -> Result<Response<Body>> {
     // Extract some useful information from the request
     let who = event
         .query_string_parameters_ref()
         .and_then(|params| params.first("name"))
         .unwrap_or("world");
     let message = format!("Hello {who}, this is an AWS Lambda HTTP request");
+    let provider = QiTechProvider::new();
+    let request = AskBalanceRequest {
+        document_number: "05577889944".to_string(),
+    };
+    match provider.ask_for_balance(request).await {
+        Ok(response) => println!("{:#?}", &response),
+        Err(e) => println!("{:#?}", e),
+    }
 
     // Return something that implements IntoResponse.
     // It will be serialized to the right response event automatically by the runtime
@@ -27,6 +37,7 @@ async fn function_handler(event: Request) -> Result<Response<Body>, Error> {
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
+    color_eyre::install()?;
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::builder()
