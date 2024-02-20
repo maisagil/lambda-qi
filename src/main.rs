@@ -5,8 +5,10 @@ use configuration::get_configuration;
 use eyre::Result;
 use lambda_http::{run, service_fn, Body, Error, Request, RequestExt, Response};
 use qitech::{AskBalanceRequest, QiTechProvider};
-use secrecy::ExposeSecret;
+use std::sync::OnceLock;
 use tracing_subscriber::filter::{EnvFilter, LevelFilter};
+
+static INSTANCE: OnceLock<QiTechProvider> = OnceLock::new();
 
 /// This is the main body for the function.
 /// Write your code inside it.
@@ -22,10 +24,11 @@ async fn function_handler(event: Request) -> Result<Response<Body>> {
     let request = AskBalanceRequest {
         document_number: "05577889944".to_string(),
     };
-    // match provider.ask_for_balance(request).await {
-    //     Ok(response) => println!("{:#?}", &response),
-    //     Err(e) => println!("{:#?}", e),
-    // }
+    let provider = INSTANCE.get().unwrap();
+    match provider.ask_for_balance(request).await {
+        Ok(response) => println!("{:#?}", &response),
+        Err(e) => println!("{:#?}", e),
+    }
 
     // Return something that implements IntoResponse.
     // It will be serialized to the right response event automatically by the runtime
@@ -43,8 +46,8 @@ async fn main() -> Result<(), Error> {
     dotenv::dotenv().ok();
 
     let configuration = get_configuration().expect("Failed to read configuration.");
-    println!("{:#?}", configuration.qi_client.private_key.expose_secret());
     let provider = QiTechProvider::new(configuration.qi_client);
+    INSTANCE.set(provider).ok();
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::builder()
