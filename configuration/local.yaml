@@ -1,0 +1,2 @@
+qi_client:
+  base_url: "https://api-auth.sandbox.qitech.app"

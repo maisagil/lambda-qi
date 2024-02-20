@@ -1,8 +1,11 @@
+pub mod configuration;
 mod qitech;
 
+use configuration::get_configuration;
 use eyre::Result;
 use lambda_http::{run, service_fn, Body, Error, Request, RequestExt, Response};
 use qitech::{AskBalanceRequest, QiTechProvider};
+use secrecy::ExposeSecret;
 use tracing_subscriber::filter::{EnvFilter, LevelFilter};
 
 /// This is the main body for the function.
@@ -16,14 +19,13 @@ async fn function_handler(event: Request) -> Result<Response<Body>> {
         .and_then(|params| params.first("name"))
         .unwrap_or("world");
     let message = format!("Hello {who}, this is an AWS Lambda HTTP request");
-    let provider = QiTechProvider::new();
     let request = AskBalanceRequest {
         document_number: "05577889944".to_string(),
     };
-    match provider.ask_for_balance(request).await {
-        Ok(response) => println!("{:#?}", &response),
-        Err(e) => println!("{:#?}", e),
-    }
+    // match provider.ask_for_balance(request).await {
+    //     Ok(response) => println!("{:#?}", &response),
+    //     Err(e) => println!("{:#?}", e),
+    // }
 
     // Return something that implements IntoResponse.
     // It will be serialized to the right response event automatically by the runtime
@@ -38,6 +40,11 @@ async fn function_handler(event: Request) -> Result<Response<Body>> {
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     color_eyre::install()?;
+    dotenv::dotenv().ok();
+
+    let configuration = get_configuration().expect("Failed to read configuration.");
+    println!("{:#?}", configuration.qi_client.private_key.expose_secret());
+    let provider = QiTechProvider::new(configuration.qi_client);
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::builder()

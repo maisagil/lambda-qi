@@ -4,7 +4,8 @@ mod models;
 pub use models::*;
 
 use reqwest::StatusCode;
-use secrecy::Secret;
+
+use crate::configuration::QIClientSettings;
 
 use self::client::{ClientError, Method, QiTechClient};
 
@@ -25,19 +26,13 @@ pub struct QiTechProvider {
 }
 
 impl QiTechProvider {
-    pub fn new() -> Self {
-        let base_url = std::env!("QI_BASE_URL").to_string();
-        let api_key = Secret::new(std::env!("QI_API_KEY").to_string());
-        let client_private_key = Secret::new(std::env!("QI_CLIENT_PRIVATE_KEY").to_string());
-        let client_private_key_password =
-            Secret::new(std::env!("QI_CLIENT_PRIVATE_KEY_PASSWORD").to_string());
-        let provider_public_key = std::env!("QI_PUBLIC_KEY").to_string();
+    pub fn new(client: QIClientSettings) -> Self {
         let client = QiTechClient::new(
-            base_url,
-            api_key,
-            client_private_key,
-            Some(client_private_key_password),
-            provider_public_key,
+            client.base_url,
+            client.api_key,
+            client.private_key,
+            Some(client.private_key_password),
+            client.provider_pub_key,
         );
         Self { client }
     }
@@ -111,14 +106,14 @@ ouLhoDfFOvahvvzuij7hhNWmWMIBfDO0LXQfKBlpGKVgTUC0TwnWa5dzUNJoX0b/
     impl QiTechProvider {
         pub async fn get_test(&self) -> Result<Response, ClientError> {
             let client = &self.client;
-            let endpoint = format!("/test/{}", std::env!("QI_API_KEY"));
+            let endpoint = "/test".to_string(); // format!("/test/{}", std::env!("QI_API_KEY"));
             let request = client.get_request(Method::GET, &endpoint);
             client.execute_request(request).await
         }
 
         pub async fn post_test(&self) -> Result<Response, ClientError> {
             let client = &self.client;
-            let endpoint = format!("/test/{}", std::env!("QI_API_KEY"));
+            let endpoint = "/test".to_string(); // format!("/test/{}", std::env!("QI_API_KEY"));
             let request = client.get_request(Method::POST, &endpoint);
             client.execute_request(request).await
         }

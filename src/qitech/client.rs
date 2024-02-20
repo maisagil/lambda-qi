@@ -23,48 +23,48 @@ pub struct QiTechClient {
 }
 
 impl QiTechClient {
+    // pub fn new(
+    //     base_url: String,
+    //     api_key: Secret<String>,
+    //     pkey: Secret<String>,
+    //     pkey_password: Option<Secret<String>>,
+    //     provider_public_key: String,
+    // ) -> Self {
+    //     let private_key = match pkey_password {
+    //         Some(password) => {
+    //             let private_key = openssl::ec::EcKey::private_key_from_pem_passphrase(
+    //                 pkey.expose_secret().as_bytes(),
+    //                 password.expose_secret().as_bytes(),
+    //             )
+    //             .unwrap();
+    //             PKey::from_ec_key(private_key).expect("PKey should be a valid EC key")
+    //         }
+    //         None => {
+    //             let private_key =
+    //                 openssl::ec::EcKey::private_key_from_pem(pkey.expose_secret().as_bytes())
+    //                     .unwrap();
+    //             PKey::from_ec_key(private_key).expect("PKey should be a valid EC key")
+    //         }
+    //     };
+    //
+    //     let provider_public_key = PKey::public_key_from_pem(provider_public_key.as_bytes())
+    //         .expect("provider_public_key should be valid PKey");
+    //     let http_client = Client::new();
+    //     let base_url = Url::parse(&base_url).expect("Should be able to parse base url");
+    //     Self {
+    //         http_client,
+    //         base_url,
+    //         private_key,
+    //         provider_public_key,
+    //         api_key,
+    //     }
+    // }
+
     pub fn new(
         base_url: String,
         api_key: Secret<String>,
-        pkey: Secret<String>,
-        pkey_password: Option<Secret<String>>,
-        provider_public_key: String,
-    ) -> Self {
-        let private_key = match pkey_password {
-            Some(password) => {
-                let private_key = openssl::ec::EcKey::private_key_from_pem_passphrase(
-                    pkey.expose_secret().as_bytes(),
-                    password.expose_secret().as_bytes(),
-                )
-                .unwrap();
-                PKey::from_ec_key(private_key).expect("PKey should be a valid EC key")
-            }
-            None => {
-                let private_key =
-                    openssl::ec::EcKey::private_key_from_pem(pkey.expose_secret().as_bytes())
-                        .unwrap();
-                PKey::from_ec_key(private_key).expect("PKey should be a valid EC key")
-            }
-        };
-
-        let provider_public_key = PKey::public_key_from_pem(provider_public_key.as_bytes())
-            .expect("provider_public_key should be valid PKey");
-        let http_client = Client::new();
-        let base_url = Url::parse(&base_url).expect("Should be able to parse base url");
-        Self {
-            http_client,
-            base_url,
-            private_key,
-            provider_public_key,
-            api_key,
-        }
-    }
-
-    pub fn new_with_base64_pkey(
-        base_url: String,
-        api_key: Secret<String>,
         base64_pkey: Secret<String>,
-        pkey_password: Secret<String>,
+        pkey_password: Option<Secret<String>>,
         provider_public_key: String,
     ) -> Self {
         let private_key = QiTechClient::read_pkey(base64_pkey, pkey_password);
@@ -92,12 +92,18 @@ impl QiTechClient {
     }
 
     /// read the private key from a base64 secret.
-    fn read_pkey(base64_pkey: Secret<String>, pkey_password: Secret<String>) -> PKey<Private> {
-        let pkey = PKey::private_key_from_pem_passphrase(
-            &QiTechClient::decode_base64(base64_pkey.expose_secret().clone()),
-            pkey_password.expose_secret().as_bytes(),
-        )
-        .expect("Should be able to create PKey");
+    fn read_pkey(base64_pkey: Secret<String>, password: Option<Secret<String>>) -> PKey<Private> {
+        let pkey = match password {
+            Some(password) => PKey::private_key_from_pem_passphrase(
+                &QiTechClient::decode_base64(base64_pkey.expose_secret().clone()),
+                password.expose_secret().as_bytes(),
+            )
+            .expect("Should be able to create PKey"),
+            None => PKey::private_key_from_pem(&QiTechClient::decode_base64(
+                base64_pkey.expose_secret().clone(),
+            ))
+            .expect("Should be able to create PKey"),
+        };
         pkey
     }
 
@@ -286,19 +292,14 @@ pub mod tests {
         encoded_body: String,
     }
 
-    pub fn create_client(base_url: String) -> QiTechClient {
-        let api_key = Secret::new(std::env!("QI_API_KEY").to_string());
-
+    pub fn create_client(
+        base_url: String,
+        api_key: Secret<String>,
+        pub_key: String,
+    ) -> QiTechClient {
         let client_private_key = Secret::new(TEST_ESKEY.to_string());
-        let provider_public_key = std::env!("QI_PUBLIC_KEY").to_string();
 
-        QiTechClient::new(
-            base_url,
-            api_key,
-            client_private_key,
-            None,
-            provider_public_key,
-        )
+        QiTechClient::new(base_url, api_key, client_private_key, None, pub_key)
     }
 
     #[test]
