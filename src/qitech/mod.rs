@@ -82,26 +82,14 @@ mod tests {
 
     use super::*;
     use claims::assert_ok;
-    // use fake::{Fake, Faker};
+    use openssl::pkey::PKey;
     use secrecy::Secret;
+    // use fake::{Fake, Faker};
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
-    pub const TEST_ESKEY: &str = r#"-----BEGIN EC PRIVATE KEY-----
-MIHcAgEBBEIBrisxA5f9J9F3mbKFJRb0ud21v0L91lWu75c4Wmebo7Rthqyt3Vjm
-JlFrCu8Lf8UuIyqXmv+1sNgizIibRjiHOxSgBwYFK4EEACOhgYkDgYYABAAMDgDQ
-bWoq0gd+W6dh42AYifvYB5OijVT+k7JrEkqgdlfvSFpCXqz6u0NHWnRSfJ/XW46F
-3UpCR6YNOV1+99fLtgBtndui4uGgN8U69qG+/O6KPuGE1aZYwgF8M7QtdB8oGWkY
-pWBNQLRPCdZrl3NQ0mhfRv/sWKrlUqtpGvm2cgDspg==
------END EC PRIVATE KEY-----
-"#;
-    pub const TEST_PUBLIC_ESKEY: &str = r#"-----BEGIN PUBLIC KEY-----
-MIGbMBAGByqGSM49AgEGBSuBBAAjA4GGAAQADA4A0G1qKtIHflunYeNgGIn72AeT
-oo1U/pOyaxJKoHZX70haQl6s+rtDR1p0Unyf11uOhd1KQkemDTldfvfXy7YAbZ3b
-ouLhoDfFOvahvvzuij7hhNWmWMIBfDO0LXQfKBlpGKVgTUC0TwnWa5dzUNJoX0b/
-7Fiq5VKraRr5tnIA7KY=
------END PUBLIC KEY-----
-"#;
+    pub const TEST_ESKEY: &str = "LS0tLS1CRUdJTiBFQyBQUklWQVRFIEtFWS0tLS0tCk1JSGNBZ0VCQkVJQnJpc3hBNWY5SjlGM21iS0ZKUmIwdWQyMXYwTDkxbFd1NzVjNFdtZWJvN1J0aHF5dDNWam0KSmxGckN1OExmOFV1SXlxWG12KzFzTmdpeklpYlJqaUhPeFNnQndZRks0RUVBQ09oZ1lrRGdZWUFCQUFNRGdEUQpiV29xMGdkK1c2ZGg0MkFZaWZ2WUI1T2lqVlQrazdKckVrcWdkbGZ2U0ZwQ1hxejZ1ME5IV25SU2ZKL1hXNDZGCjNVcENSNllOT1YxKzk5Zkx0Z0J0bmR1aTR1R2dOOFU2OXFHKy9PNktQdUdFMWFaWXdnRjhNN1F0ZEI4b0dXa1kKcFdCTlFMUlBDZFpybDNOUTBtaGZSdi9zV0tybFVxdHBHdm0yY2dEc3BnPT0KLS0tLS1FTkQgRUMgUFJJVkFURSBLRVktLS0tLQo=";
+    pub const TEST_PUBLIC_ESKEY: &str = "LS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS0KTUlHYk1CQUdCeXFHU000OUFnRUdCU3VCQkFBakE0R0dBQVFBREE0QTBHMXFLdElIZmx1blllTmdHSW43MkFlVApvbzFVL3BPeWF4SktvSFpYNzBoYVFsNnMrcnREUjFwMFVueWYxMXVPaGQxS1FrZW1EVGxkZnZmWHk3WUFiWjNiCm91TGhvRGZGT3ZhaHZ2enVpajdoaE5XbVdNSUJmRE8wTFhRZktCbHBHS1ZnVFVDMFR3bldhNWR6VU5Kb1gwYi8KN0ZpcTVWS3JhUnI1dG5JQTdLWT0KLS0tLS1FTkQgUFVCTElDIEtFWS0tLS0tCg==";
 
     impl QiTechProvider {
         pub async fn get_test(&self) -> Result<Response, ClientError> {
@@ -178,7 +166,11 @@ ouLhoDfFOvahvvzuij7hhNWmWMIBfDO0LXQfKBlpGKVgTUC0TwnWa5dzUNJoX0b/
     }
 
     fn create_provider(base_url: String) -> QiTechProvider {
-        let client = create_client(base_url);
+        let client = create_client(
+            base_url,
+            Secret::new(TEST_ESKEY.to_string()),
+            TEST_PUBLIC_ESKEY.to_string(),
+        );
         QiTechProvider { client }
     }
 }

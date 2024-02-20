@@ -292,6 +292,15 @@ pub mod tests {
         encoded_body: String,
     }
 
+    fn get_pkey() -> PKey<Private> {
+        QiTechClient::read_pkey(Secret::new(TEST_ESKEY.to_string()), None)
+    }
+
+    fn get_pubkey() -> PKey<Public> {
+        PKey::public_key_from_pem(&QiTechClient::decode_base64(TEST_PUBLIC_ESKEY.to_string()))
+            .expect("Should be able to create PKey")
+    }
+
     pub fn create_client(
         base_url: String,
         api_key: Secret<String>,
@@ -304,7 +313,7 @@ pub mod tests {
 
     #[test]
     fn can_encode_json_body() {
-        let pkey = PKey::private_key_from_pem(TEST_ESKEY.as_bytes()).unwrap();
+        let pkey = get_pkey();
 
         // return a authorized request
         let (encoded_body, md5_hash) =
@@ -317,9 +326,9 @@ pub mod tests {
     #[test]
     fn can_decode_json_body() {
         //generate Ecdsa key
-        let pkey = PKey::private_key_from_pem(TEST_ESKEY.as_bytes()).unwrap();
+        let pkey = get_pkey();
 
-        let pub_key = PKey::public_key_from_pem(TEST_PUBLIC_ESKEY.as_bytes()).unwrap();
+        let pub_key = get_pubkey();
         // return a authorized request
         let (encoded_body, _) =
             QiTechClient::encode_body(pkey, &TEST_JSON_BODY.to_string().into()).unwrap();
@@ -331,7 +340,7 @@ pub mod tests {
 
     #[test]
     fn can_encode_headers() {
-        let pkey = PKey::private_key_from_pem(TEST_ESKEY.as_bytes()).unwrap();
+        let pkey = get_pkey();
 
         // return a authorized request
         let (encoded_body, md5_hash) =
