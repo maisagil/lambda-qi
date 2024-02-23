@@ -1,11 +1,12 @@
 use std::fmt::{Debug, Display};
 
 use base64::Engine as _;
-use chrono::prelude::Utc;
+use chrono::prelude::*;
 use jwt::algorithm::openssl::PKeyWithDigest;
+use jwt::Verified;
 use jwt::{header::HeaderType, AlgorithmType, Header, SignWithKey, Token, VerifyWithKey};
 use openssl::pkey::{PKey, Private, Public};
-use reqwest::{header, Body, Client, RequestBuilder};
+use reqwest::{header, Client, RequestBuilder};
 use secrecy::{ExposeSecret, Secret};
 
 pub type Method = reqwest::Method;
@@ -78,7 +79,10 @@ impl QiTechClient {
         }
     }
 
-    fn encode_body(pkey: PKey<Private>, body: &Body) -> Result<(String, String), ClientError> {
+    fn encode_body<T>(pkey: PKey<Private>, body: T) -> Result<(String, String), ClientError>
+    where
+        T: jwt::ToBase64,
+    {
         let pkey = QiTechClient::get_digest(pkey);
         let header = Header {
             algorithm: AlgorithmType::Es512,
@@ -86,43 +90,42 @@ impl QiTechClient {
             ..Default::default()
         };
 
-        let body = String::from_utf8(
-            body.as_bytes()
-                .ok_or_else(|| ClientError::InvalidRequestBody)?
-                .to_vec(),
-        )
-        .map_err(|_| ClientError::InvalidRequestBody)?;
-
         let encoded_body_token = Token::new(header, body).sign_with_key(&pkey)?;
 
-        let encoded_body = String::from(encoded_body_token.as_str());
+        let encoded_body: EncodedBody = EncodedBody {
+            encoded_body: encoded_body_token.as_str(),
+        };
 
-        let md5_hash = format!("{:x}", md5::compute(encoded_body_token.as_str()));
+        let encoded_body = serde_json::to_vec(&encoded_body).unwrap();
+
+        let md5_hash = format!("{:x}", md5::compute(&encoded_body));
+
+        let encoded_body = String::from_utf8(encoded_body).unwrap();
 
         Ok((encoded_body, md5_hash))
     }
 
-    fn decode_body(pkey: PKey<Public>, token_str: &str) -> Result<String, ClientError> {
+    fn decode_body(pkey: PKey<Public>, token_str: &str) -> Result<serde_json::Value, ClientError> {
         let pkey = QiTechClient::get_digest(pkey);
 
-        let token: Token<Header, String, _> = token_str.verify_with_key(&pkey)?;
+        let token: Token<Header, serde_json::Value, Verified> = token_str.verify_with_key(&pkey)?;
         Ok(token.claims().clone())
     }
 
     fn encode_headers(
-        &self,
+        pkey: PKey<Private>,
+        api_key: Secret<String>,
         method: Method,
         md5_hash: impl Display,
         content_type: impl Display,
         endpoint: impl Display,
     ) -> Result<String, ClientError> {
-        let pkey = QiTechClient::get_digest(self.private_key.clone());
-        let api_key = self.api_key.clone();
-        let timestamp = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let pkey = QiTechClient::get_digest(pkey);
         let epoch_timestamp = Utc::now().timestamp();
+        let formated_date = Utc::now().format("%a, %d %b %Y %H:%M:%S GMT").to_string();
         let string_to_sign = format!(
             "{}\n{}\n{}\n{}\n{}",
-            method, md5_hash, content_type, timestamp, endpoint
+            method, md5_hash, content_type, formated_date, endpoint
         );
 
         let header = Header {
@@ -153,8 +156,16 @@ impl QiTechClient {
         let request_headers = request.headers();
 
         let (encoded_body, md5_hash) = match request_body {
-            Some(body) => QiTechClient::encode_body(self.private_key.clone(), body)?,
-            None => ("".to_string(), "".to_string()),
+            Some(body) => {
+                let body = String::from_utf8(
+                    body.as_bytes()
+                        .ok_or_else(|| ClientError::InvalidRequestBody)?
+                        .to_vec(),
+                )
+                .map_err(|_| ClientError::InvalidRequestBody)?;
+                QiTechClient::encode_body(self.private_key.clone(), body)?
+            }
+            None => todo!(),
         };
 
         let content_type = request_headers
@@ -165,9 +176,15 @@ impl QiTechClient {
         let url = request.url();
         let endpoint = url.path();
         let method = request.method();
-        let authorization_header = self
-            .encode_headers(method.into(), md5_hash, content_type, endpoint)?
-            .parse()?;
+        let authorization_header = QiTechClient::encode_headers(
+            self.private_key.clone(),
+            self.api_key.clone(),
+            method.into(),
+            md5_hash,
+            content_type,
+            endpoint,
+        )?
+        .parse()?;
 
         let mut new_request = request
             .try_clone()
@@ -178,9 +195,13 @@ impl QiTechClient {
         let api_key = self.api_key.expose_secret().to_string().parse()?;
         request_headers.insert("API-CLIENT-KEY", api_key);
 
-        let _ = new_request
-            .body_mut()
-            .insert(format!("{{\"encoded_body\": \"{}\"}}", encoded_body).into());
+        let body = new_request.body_mut().insert(encoded_body.into());
+        // TODO: remove this later.
+        // println!(
+        //     "{:?}",
+        //     String::from_utf8(body.as_bytes().unwrap().to_vec()).unwrap()
+        // );
+        // dbg!(&new_request);
         Ok(new_request)
     }
 
@@ -203,11 +224,15 @@ impl QiTechClient {
         let request = request.build()?;
         // return a authorized request
         let request = self.authenticate_request(request)?;
-        println!("request: {:?}", request);
         // execute the request
         Ok(self.http_client.execute(request).await?)
         // decode_body
     }
+}
+
+#[derive(serde::Deserialize, serde::Serialize, Debug)]
+struct EncodedBody<'a> {
+    encoded_body: &'a str,
 }
 
 /// Claims for JWT token generation, in the format that the QiTech wants.
@@ -254,11 +279,6 @@ pub mod tests {
     const TEST_ENDPOINT: &str = "/test";
     const TEST_JSON_BODY: &str = r#"{"name":"Tester"}"#;
 
-    #[derive(serde::Deserialize, Debug)]
-    struct EncodedBody {
-        encoded_body: String,
-    }
-
     fn get_pkey() -> PKey<Private> {
         QiTechClient::read_pkey(Secret::new(TEST_ESKEY.to_string()), None)
     }
@@ -283,8 +303,7 @@ pub mod tests {
         let pkey = get_pkey();
 
         // return a authorized request
-        let (encoded_body, md5_hash) =
-            QiTechClient::encode_body(pkey, &TEST_JSON_BODY.to_string().into()).unwrap();
+        let (encoded_body, md5_hash) = QiTechClient::encode_body(pkey, TEST_JSON_BODY).unwrap();
 
         assert_gt!(encoded_body.len(), 0);
         assert_gt!(md5_hash.len(), 0);
@@ -297,13 +316,13 @@ pub mod tests {
 
         let pub_key = get_pubkey();
         // return a authorized request
-        let (encoded_body, _) =
-            QiTechClient::encode_body(pkey, &TEST_JSON_BODY.to_string().into()).unwrap();
+        let body = serde_json::from_str::<serde_json::Value>(TEST_JSON_BODY).unwrap();
+        let (encoded_body, _) = QiTechClient::encode_body(pkey, &body).unwrap();
 
-        println!("{:#?}", encoded_body);
-        let decoded_body = QiTechClient::decode_body(pub_key, &encoded_body).unwrap();
+        let encoded_body = serde_json::from_str::<EncodedBody>(&encoded_body).unwrap();
+        let decoded_body = QiTechClient::decode_body(pub_key, encoded_body.encoded_body).unwrap();
 
-        assert_eq!(decoded_body, TEST_JSON_BODY);
+        assert_eq!(body, decoded_body);
     }
 
     #[test]
@@ -312,17 +331,40 @@ pub mod tests {
 
         // return a authorized request
         let (encoded_body, md5_hash) =
-            QiTechClient::encode_body(pkey, &TEST_JSON_BODY.to_string().into()).unwrap();
+            QiTechClient::encode_body(pkey.clone(), TEST_JSON_BODY).unwrap();
 
         assert_gt!(encoded_body.len(), 0);
         assert_gt!(md5_hash.len(), 0);
+        let content_type = "application/json".to_string();
+        let url: Url = format!("{}{}", BASE_URL, TEST_ENDPOINT).parse().unwrap();
+        let endpoint = url.path();
+        let method = Method::GET;
+        let authorization_header = QiTechClient::encode_headers(
+            pkey.clone(),
+            Secret::new("verysupersecretkey".into()),
+            method,
+            md5_hash,
+            content_type,
+            endpoint,
+        )
+        .unwrap();
         // TODO: Validate that the headers are correct
-        todo!()
+        assert_gt!(authorization_header.len(), 0);
     }
 
     #[test]
     fn can_decode_headers() {
-        todo!()
+        let pkey = get_pkey();
+
+        let pub_key = get_pubkey();
+
+        let body = serde_json::from_str::<serde_json::Value>(TEST_JSON_BODY).unwrap();
+
+        let (encoded_body, _) = QiTechClient::encode_body(pkey, &body).unwrap();
+        let encoded_body = serde_json::from_str::<EncodedBody>(&encoded_body).unwrap();
+        let decoded_body = QiTechClient::decode_body(pub_key, encoded_body.encoded_body).unwrap();
+
+        assert_eq!(body, decoded_body);
     }
 
     #[test]
@@ -349,6 +391,18 @@ pub mod tests {
 
     #[test]
     fn empty_request_is_populated_with_auth_data() {
-        todo!()
+        let client = create_client(
+            BASE_URL.into(),
+            Secret::new(TEST_ESKEY.into()),
+            TEST_PUBLIC_ESKEY.into(),
+        );
+        let request = client
+            .get_request(Method::GET, TEST_ENDPOINT)
+            .build()
+            .unwrap();
+        let authorized_request = client.authenticate_request(request).unwrap();
+
+        assert!(authorized_request.headers().get("API-CLIENT-KEY").is_some());
+        assert!(authorized_request.headers().get("AUTHORIZATION").is_some());
     }
 }

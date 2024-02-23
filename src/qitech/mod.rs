@@ -39,10 +39,7 @@ impl QiTechProvider {
 }
 
 impl QiTechProvider {
-    pub async fn ask_for_balance(
-        &self,
-        data: AskBalanceRequest,
-    ) -> Result<serde_json::Value, ProviderError> {
+    pub async fn ask_for_balance(&self, data: AskBalanceRequest) -> Result<String, ProviderError> {
         let client = &self.client;
         let request = client
             .get_request(Method::POST, "/baas/v2/fgts/available_balance")
@@ -51,14 +48,17 @@ impl QiTechProvider {
 
         let body = match response.status() {
             StatusCode::OK => {
-                let body = response.json::<serde_json::Value>().await;
+                let body = response.text().await;
                 body.map_err(|e| ProviderError::ResponseParse(e.to_string()))
             }
             StatusCode::UNAUTHORIZED | StatusCode::BAD_REQUEST => {
-                let body = response.json::<serde_json::Value>().await;
+                let body = response.text().await;
                 body.map_err(|e| ProviderError::ResponseParse(e.to_string()))
             }
-            _ => todo!(),
+            _ => response
+                .text()
+                .await
+                .map_err(|e| ProviderError::ResponseParse(e.to_string())),
         }?;
         Ok(body)
     }
@@ -79,14 +79,13 @@ mod tests {
 
     use super::*;
     use claims::assert_ok;
-    use openssl::pkey::PKey;
+    use jwt::ToBase64;
     use secrecy::Secret;
-    // use fake::{Fake, Faker};
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
-    pub const TEST_ESKEY: &str = "LS0tLS1CRUdJTiBFQyBQUklWQVRFIEtFWS0tLS0tCk1JSGNBZ0VCQkVJQnJpc3hBNWY5SjlGM21iS0ZKUmIwdWQyMXYwTDkxbFd1NzVjNFdtZWJvN1J0aHF5dDNWam0KSmxGckN1OExmOFV1SXlxWG12KzFzTmdpeklpYlJqaUhPeFNnQndZRks0RUVBQ09oZ1lrRGdZWUFCQUFNRGdEUQpiV29xMGdkK1c2ZGg0MkFZaWZ2WUI1T2lqVlQrazdKckVrcWdkbGZ2U0ZwQ1hxejZ1ME5IV25SU2ZKL1hXNDZGCjNVcENSNllOT1YxKzk5Zkx0Z0J0bmR1aTR1R2dOOFU2OXFHKy9PNktQdUdFMWFaWXdnRjhNN1F0ZEI4b0dXa1kKcFdCTlFMUlBDZFpybDNOUTBtaGZSdi9zV0tybFVxdHBHdm0yY2dEc3BnPT0KLS0tLS1FTkQgRUMgUFJJVkFURSBLRVktLS0tLQo=";
-    pub const TEST_PUBLIC_ESKEY: &str = "LS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS0KTUlHYk1CQUdCeXFHU000OUFnRUdCU3VCQkFBakE0R0dBQVFBREE0QTBHMXFLdElIZmx1blllTmdHSW43MkFlVApvbzFVL3BPeWF4SktvSFpYNzBoYVFsNnMrcnREUjFwMFVueWYxMXVPaGQxS1FrZW1EVGxkZnZmWHk3WUFiWjNiCm91TGhvRGZGT3ZhaHZ2enVpajdoaE5XbVdNSUJmRE8wTFhRZktCbHBHS1ZnVFVDMFR3bldhNWR6VU5Kb1gwYi8KN0ZpcTVWS3JhUnI1dG5JQTdLWT0KLS0tLS1FTkQgUFVCTElDIEtFWS0tLS0tCg==";
+    pub const TEST_ESKEY: &str = "LS0tLS1CRUdJTiBFQyBQUklWQVRFIEtFWS0tLS0tCk1IUUNBUUVFSUw2ZlQvTjBYOUdJTk03N3VkQ2UwSzV5RVR4Y2h4UGQ2c0R0enFaSXlsMTJvQWNHQlN1QkJBQUsKb1VRRFFnQUVNREdHbHRBRlFocXMyUUJ1aWRCcHQvWTg3RkhqVUlCZEFDQlJ0dFlpSWV1b2RObSt5a0tzcU9vYQo1OFVZc1VnWS84YTU3V2pZZ0IwNmNhWnE1NVdBNXc9PQotLS0tLUVORCBFQyBQUklWQVRFIEtFWS0tLS0tCg==";
+    pub const TEST_PUBLIC_ESKEY: &str = "LS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS0KTUZZd0VBWUhLb1pJemowQ0FRWUZLNEVFQUFvRFFnQUVNREdHbHRBRlFocXMyUUJ1aWRCcHQvWTg3RkhqVUlCZApBQ0JSdHRZaUlldW9kTm0reWtLc3FPb2E1OFVZc1VnWS84YTU3V2pZZ0IwNmNhWnE1NVdBNXc9PQotLS0tLUVORCBQVUJMSUMgS0VZLS0tLS0K";
 
     impl QiTechProvider {
         pub async fn get_test(&self) -> Result<Response, ClientError> {
@@ -130,6 +129,7 @@ mod tests {
             .await;
 
         let response = client.get_test().await;
+        println!("{:?}", response);
         assert_ok!(response);
     }
 
@@ -162,10 +162,43 @@ mod tests {
         assert_ok!(response);
     }
 
+    #[tokio::test]
+    async fn qi_tech_receives_a_valid_request() {
+        let body = r#"{"document_number": "05577889944"}"#;
+        let body = serde_json::from_str::<AskBalanceRequest>(body).unwrap();
+        let mock_server = MockServer::start().await;
+        let provider = create_provider(mock_server.uri());
+        Mock::given(method("POST"))
+            .and(path("/baas/v2/fgts/available_balance"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "available_balance_key": "7521981f-0b06-43d2-9a75-d3a1f215fbbf",
+                "document_number": "06568225037",
+                "status": "pending",
+                "status_events": [{
+                    "event_datetime": "2022-12-26T13:36:16",
+                    "status": "pending"
+                }]
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+        let response = provider.ask_for_balance(body).await;
+        assert_ok!(response);
+
+        let received_request = mock_server
+            .received_requests()
+            .await
+            .unwrap()
+            .pop()
+            .unwrap();
+        println!("Request: {:?}", received_request);
+        println!("Body: {:?}", received_request.body.to_base64());
+    }
+
     fn create_provider(base_url: String) -> QiTechProvider {
         let client = create_client(
             base_url,
-            Secret::new(TEST_ESKEY.to_string()),
+            Secret::new("superverysecretkey".to_string()),
             TEST_PUBLIC_ESKEY.to_string(),
         );
         QiTechProvider { client }
