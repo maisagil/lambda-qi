@@ -2,7 +2,6 @@ pub mod configuration;
 mod qitech;
 
 use configuration::get_configuration;
-use eyre::Result;
 use lambda_http::{run, service_fn, Body, Error, Request, RequestExt, Response};
 use qitech::{AskBalanceRequest, QiTechProvider};
 use std::sync::OnceLock;
@@ -14,7 +13,7 @@ static INSTANCE: OnceLock<QiTechProvider> = OnceLock::new();
 /// Write your code inside it.
 /// There are some code example in the following URLs:
 /// - https://github.com/awslabs/aws-lambda-rust-runtime/tree/main/examples
-async fn function_handler(event: Request) -> Result<Response<Body>> {
+async fn function_handler(event: Request) -> Result<Response<Body>, anyhow::Error> {
     // Extract some useful information from the request
     let who = event
         .query_string_parameters_ref()
@@ -42,7 +41,6 @@ async fn function_handler(event: Request) -> Result<Response<Body>> {
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
-    color_eyre::install()?;
     dotenv::dotenv().ok();
 
     let configuration = get_configuration().expect("Failed to read configuration.");

@@ -23,43 +23,6 @@ pub struct QiTechClient {
 }
 
 impl QiTechClient {
-    // pub fn new(
-    //     base_url: String,
-    //     api_key: Secret<String>,
-    //     pkey: Secret<String>,
-    //     pkey_password: Option<Secret<String>>,
-    //     provider_public_key: String,
-    // ) -> Self {
-    //     let private_key = match pkey_password {
-    //         Some(password) => {
-    //             let private_key = openssl::ec::EcKey::private_key_from_pem_passphrase(
-    //                 pkey.expose_secret().as_bytes(),
-    //                 password.expose_secret().as_bytes(),
-    //             )
-    //             .unwrap();
-    //             PKey::from_ec_key(private_key).expect("PKey should be a valid EC key")
-    //         }
-    //         None => {
-    //             let private_key =
-    //                 openssl::ec::EcKey::private_key_from_pem(pkey.expose_secret().as_bytes())
-    //                     .unwrap();
-    //             PKey::from_ec_key(private_key).expect("PKey should be a valid EC key")
-    //         }
-    //     };
-    //
-    //     let provider_public_key = PKey::public_key_from_pem(provider_public_key.as_bytes())
-    //         .expect("provider_public_key should be valid PKey");
-    //     let http_client = Client::new();
-    //     let base_url = Url::parse(&base_url).expect("Should be able to parse base url");
-    //     Self {
-    //         http_client,
-    //         base_url,
-    //         private_key,
-    //         provider_public_key,
-    //         api_key,
-    //     }
-    // }
-
     pub fn new(
         base_url: String,
         api_key: Secret<String>,
@@ -215,7 +178,9 @@ impl QiTechClient {
         let api_key = self.api_key.expose_secret().to_string().parse()?;
         request_headers.insert("API-CLIENT-KEY", api_key);
 
-        let _ = new_request.body_mut().insert(encoded_body.into());
+        let _ = new_request
+            .body_mut()
+            .insert(format!("{{\"encoded_body\": \"{}\"}}", encoded_body).into());
         Ok(new_request)
     }
 
@@ -238,8 +203,10 @@ impl QiTechClient {
         let request = request.build()?;
         // return a authorized request
         let request = self.authenticate_request(request)?;
+        println!("request: {:?}", request);
         // execute the request
         Ok(self.http_client.execute(request).await?)
+        // decode_body
     }
 }
 
@@ -283,7 +250,7 @@ pub mod tests {
 
     use super::*;
 
-    const BASE_URL: &str = r#"http://127.0.0.1/test"#;
+    const BASE_URL: &str = r#"http://127.0.0.1"#;
     const TEST_ENDPOINT: &str = "/test";
     const TEST_JSON_BODY: &str = r#"{"name":"Tester"}"#;
 
@@ -333,6 +300,7 @@ pub mod tests {
         let (encoded_body, _) =
             QiTechClient::encode_body(pkey, &TEST_JSON_BODY.to_string().into()).unwrap();
 
+        println!("{:#?}", encoded_body);
         let decoded_body = QiTechClient::decode_body(pub_key, &encoded_body).unwrap();
 
         assert_eq!(decoded_body, TEST_JSON_BODY);
@@ -359,7 +327,24 @@ pub mod tests {
 
     #[test]
     fn json_request_is_populated_with_auth_data() {
-        todo!()
+        let client = create_client(
+            BASE_URL.into(),
+            Secret::new(TEST_ESKEY.into()),
+            TEST_PUBLIC_ESKEY.into(),
+        );
+        let request = client
+            .get_request(Method::GET, TEST_ENDPOINT)
+            .json(TEST_JSON_BODY)
+            .build()
+            .unwrap();
+        let authorized_request = client.authenticate_request(request).unwrap();
+        // if the serde can parse this, then the request has a valid body.
+        let _ = serde_json::from_slice::<EncodedBody>(
+            authorized_request.body().unwrap().as_bytes().unwrap(),
+        )
+        .unwrap();
+        assert!(authorized_request.headers().get("API-CLIENT-KEY").is_some());
+        assert!(authorized_request.headers().get("AUTHORIZATION").is_some());
     }
 
     #[test]

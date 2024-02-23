@@ -48,7 +48,6 @@ impl QiTechProvider {
             .get_request(Method::POST, "/baas/v2/fgts/available_balance")
             .json(&data);
         let response = client.execute_request(request).await?;
-        // println!("{:?}", &response);
 
         let body = match response.status() {
             StatusCode::OK => {
@@ -67,8 +66,6 @@ impl QiTechProvider {
 
 #[derive(thiserror::Error, Debug)]
 pub enum ProviderError {
-    #[error("The provider returned an error {0}")]
-    Provider(serde_json::Value),
     #[error("The response could not be parsed successfully")]
     ResponseParse(String),
     #[error(transparent)]
