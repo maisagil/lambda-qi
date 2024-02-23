@@ -1,5 +1,5 @@
 [package]
-name = "lambda-balance"
+name = "qi-client"
 version = "0.1.0"
 edition = "2021"
 
