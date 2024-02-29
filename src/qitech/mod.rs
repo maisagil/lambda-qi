@@ -74,12 +74,12 @@ pub enum ProviderError {
 
 #[cfg(test)]
 mod tests {
+
     use self::client::tests::create_client;
     use self::client::Response;
 
     use super::*;
     use claims::assert_ok;
-    use jwt::ToBase64;
     use secrecy::Secret;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -192,7 +192,10 @@ mod tests {
             .pop()
             .unwrap();
         println!("Request: {:?}", received_request);
-        println!("Body: {:?}", received_request.body.to_base64());
+        println!(
+            "Body: {:?}",
+            serde_json::from_slice::<serde_json::Value>(&received_request.body.to_vec()).unwrap()
+        );
     }
 
     fn create_provider(base_url: String) -> QiTechProvider {

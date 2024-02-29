@@ -1,7 +1,10 @@
+use std::borrow::Borrow;
 use std::fmt::{Debug, Display};
 
 use base64::Engine as _;
 use chrono::prelude::*;
+use josekit::jws::{JwsHeader, ES512};
+use josekit::jwt::JwtPayload;
 use jwt::algorithm::openssl::PKeyWithDigest;
 use jwt::Verified;
 use jwt::{header::HeaderType, AlgorithmType, Header, SignWithKey, Token, VerifyWithKey};
@@ -79,28 +82,24 @@ impl QiTechClient {
         }
     }
 
-    fn encode_body<T>(pkey: PKey<Private>, body: T) -> Result<(String, String), ClientError>
-    where
-        T: jwt::ToBase64,
-    {
-        let pkey = QiTechClient::get_digest(pkey);
-        let header = Header {
-            algorithm: AlgorithmType::Es512,
-            type_: Some(HeaderType::JsonWebToken),
-            ..Default::default()
-        };
+    fn encode_body(
+        pkey: PKey<Private>,
+        body: &serde_json::Value,
+    ) -> Result<(EncodedBody, String), ClientError> {
+        let mut header = JwsHeader::new();
+        header.set_token_type("JWT");
 
-        let encoded_body_token = Token::new(header, body).sign_with_key(&pkey)?;
+        let payload: JwtPayload = JwtPayload::from_map(body.as_object().unwrap().clone()).unwrap();
 
-        let encoded_body: EncodedBody = EncodedBody {
-            encoded_body: encoded_body_token.as_str(),
-        };
+        let signer = ES512
+            .signer_from_der(pkey.private_key_to_der().unwrap())
+            .unwrap();
+        let jwt = josekit::jwt::encode_with_signer(&payload, &header, &signer).unwrap();
+        // let encoded_body_token = Token::new(header, body).sign_with_key(&pkey)?;
 
-        let encoded_body = serde_json::to_vec(&encoded_body).unwrap();
+        let md5_hash = format!("{:x}", md5::compute(jwt.as_str()));
 
-        let md5_hash = format!("{:x}", md5::compute(&encoded_body));
-
-        let encoded_body = String::from_utf8(encoded_body).unwrap();
+        let encoded_body: EncodedBody = EncodedBody { encoded_body: jwt };
 
         Ok((encoded_body, md5_hash))
     }
@@ -157,13 +156,12 @@ impl QiTechClient {
 
         let (encoded_body, md5_hash) = match request_body {
             Some(body) => {
-                let body = String::from_utf8(
+                let body: serde_json::Value = serde_json::from_slice(
                     body.as_bytes()
-                        .ok_or_else(|| ClientError::InvalidRequestBody)?
-                        .to_vec(),
+                        .ok_or_else(|| ClientError::InvalidRequestBody)?,
                 )
                 .map_err(|_| ClientError::InvalidRequestBody)?;
-                QiTechClient::encode_body(self.private_key.clone(), body)?
+                QiTechClient::encode_body(self.private_key.clone(), &body)?
             }
             None => todo!(),
         };
@@ -193,15 +191,13 @@ impl QiTechClient {
         request_headers.insert(header::AUTHORIZATION, authorization_header);
 
         let api_key = self.api_key.expose_secret().to_string().parse()?;
-        request_headers.insert("API-CLIENT-KEY", api_key);
+        request_headers.insert("api-client-key", api_key);
 
-        let body = new_request.body_mut().insert(encoded_body.into());
-        // TODO: remove this later.
-        // println!(
-        //     "{:?}",
-        //     String::from_utf8(body.as_bytes().unwrap().to_vec()).unwrap()
-        // );
-        // dbg!(&new_request);
+        let string_body = serde_json::to_vec(&encoded_body).unwrap();
+        let _ = new_request
+            .body_mut()
+            .insert(reqwest::Body::from(string_body));
+
         Ok(new_request)
     }
 
@@ -231,8 +227,8 @@ impl QiTechClient {
 }
 
 #[derive(serde::Deserialize, serde::Serialize, Debug)]
-struct EncodedBody<'a> {
-    encoded_body: &'a str,
+struct EncodedBody {
+    encoded_body: String,
 }
 
 /// Claims for JWT token generation, in the format that the QiTech wants.
@@ -303,9 +299,10 @@ pub mod tests {
         let pkey = get_pkey();
 
         // return a authorized request
-        let (encoded_body, md5_hash) = QiTechClient::encode_body(pkey, TEST_JSON_BODY).unwrap();
+        let body = serde_json::from_str::<serde_json::Value>(TEST_JSON_BODY).unwrap();
+        let (encoded_body, md5_hash) = QiTechClient::encode_body(pkey, &body).unwrap();
 
-        assert_gt!(encoded_body.len(), 0);
+        assert_gt!(encoded_body.encoded_body.len(), 0);
         assert_gt!(md5_hash.len(), 0);
     }
 
@@ -319,8 +316,7 @@ pub mod tests {
         let body = serde_json::from_str::<serde_json::Value>(TEST_JSON_BODY).unwrap();
         let (encoded_body, _) = QiTechClient::encode_body(pkey, &body).unwrap();
 
-        let encoded_body = serde_json::from_str::<EncodedBody>(&encoded_body).unwrap();
-        let decoded_body = QiTechClient::decode_body(pub_key, encoded_body.encoded_body).unwrap();
+        let decoded_body = QiTechClient::decode_body(pub_key, &encoded_body.encoded_body).unwrap();
 
         assert_eq!(body, decoded_body);
     }
@@ -330,10 +326,10 @@ pub mod tests {
         let pkey = get_pkey();
 
         // return a authorized request
-        let (encoded_body, md5_hash) =
-            QiTechClient::encode_body(pkey.clone(), TEST_JSON_BODY).unwrap();
+        let body = serde_json::from_str::<serde_json::Value>(TEST_JSON_BODY).unwrap();
+        let (encoded_body, md5_hash) = QiTechClient::encode_body(pkey.clone(), &body).unwrap();
 
-        assert_gt!(encoded_body.len(), 0);
+        assert_gt!(encoded_body.encoded_body.len(), 0);
         assert_gt!(md5_hash.len(), 0);
         let content_type = "application/json".to_string();
         let url: Url = format!("{}{}", BASE_URL, TEST_ENDPOINT).parse().unwrap();
@@ -361,8 +357,7 @@ pub mod tests {
         let body = serde_json::from_str::<serde_json::Value>(TEST_JSON_BODY).unwrap();
 
         let (encoded_body, _) = QiTechClient::encode_body(pkey, &body).unwrap();
-        let encoded_body = serde_json::from_str::<EncodedBody>(&encoded_body).unwrap();
-        let decoded_body = QiTechClient::decode_body(pub_key, encoded_body.encoded_body).unwrap();
+        let decoded_body = QiTechClient::decode_body(pub_key, &encoded_body.encoded_body).unwrap();
 
         assert_eq!(body, decoded_body);
     }
