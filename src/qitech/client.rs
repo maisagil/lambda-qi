@@ -1,13 +1,9 @@
-use std::borrow::Borrow;
 use std::fmt::{Debug, Display};
 
 use base64::Engine as _;
 use chrono::prelude::*;
 use josekit::jws::{JwsHeader, ES512};
 use josekit::jwt::JwtPayload;
-use jwt::algorithm::openssl::PKeyWithDigest;
-use jwt::Verified;
-use jwt::{header::HeaderType, AlgorithmType, Header, SignWithKey, Token, VerifyWithKey};
 use openssl::pkey::{PKey, Private, Public};
 use reqwest::{header, Client, RequestBuilder};
 use secrecy::{ExposeSecret, Secret};
@@ -74,14 +70,6 @@ impl QiTechClient {
         pkey
     }
 
-    /// get the private key with digest to compute the jwt.
-    fn get_digest<T>(pkey: PKey<T>) -> PKeyWithDigest<T> {
-        PKeyWithDigest {
-            digest: openssl::hash::MessageDigest::sha512(),
-            key: pkey,
-        }
-    }
-
     fn encode_body(
         pkey: PKey<Private>,
         body: &serde_json::Value,
@@ -105,10 +93,11 @@ impl QiTechClient {
     }
 
     fn decode_body(pkey: PKey<Public>, token_str: &str) -> Result<serde_json::Value, ClientError> {
-        let pkey = QiTechClient::get_digest(pkey);
-
-        let token: Token<Header, serde_json::Value, Verified> = token_str.verify_with_key(&pkey)?;
-        Ok(token.claims().clone())
+        // let pkey = QiTechClient::get_digest(pkey);
+        //
+        // let token: Token<Header, serde_json::Value, Verified> = token_str.verify_with_key(&pkey)?;
+        // Ok(token.claims().clone())
+        todo!()
     }
 
     fn encode_headers(
@@ -119,7 +108,6 @@ impl QiTechClient {
         content_type: impl Display,
         endpoint: impl Display,
     ) -> Result<String, ClientError> {
-        let pkey = QiTechClient::get_digest(pkey);
         let epoch_timestamp = Utc::now().timestamp();
         let formated_date = Utc::now().format("%a, %d %b %Y %H:%M:%S GMT").to_string();
         let string_to_sign = format!(
@@ -127,25 +115,21 @@ impl QiTechClient {
             method, md5_hash, content_type, formated_date, endpoint
         );
 
-        let header = Header {
-            algorithm: AlgorithmType::Es512,
-            type_: Some(HeaderType::JsonWebToken),
-            ..Default::default()
-        };
+        let mut header = JwsHeader::new();
+        header.set_token_type("JWT");
 
-        let claims = QiClaims::new(
-            api_key.expose_secret().clone(),
-            epoch_timestamp,
-            string_to_sign,
-        );
+        let mut payload = JwtPayload::new();
 
-        let encoded_header_token = Token::new(header, claims).sign_with_key(&pkey)?;
+        payload.set_claim("sub", Some(api_key.expose_secret().clone().into()))?;
+        payload.set_claim("iat", Some(epoch_timestamp.into()))?;
+        payload.set_claim("signature", Some(string_to_sign.into()))?;
 
-        let authorization_header = format!(
-            "QIT {}:{}",
-            api_key.expose_secret(),
-            encoded_header_token.as_str()
-        );
+        let signer = ES512
+            .signer_from_der(pkey.private_key_to_der().unwrap())
+            .unwrap();
+        let jwt = josekit::jwt::encode_with_signer(&payload, &header, &signer).unwrap();
+
+        let authorization_header = format!("QIT {}:{}", api_key.expose_secret(), jwt.as_str());
         Ok(authorization_header)
     }
 
@@ -260,7 +244,7 @@ pub enum ClientError {
     #[error("Client could not make the request")]
     ExecutionError(#[from] reqwest::Error),
     #[error("JWT sign or decode failed.")]
-    JwtSignatureError(#[from] jwt::error::Error),
+    JwtSignatureError(#[from] josekit::JoseError),
 }
 
 #[cfg(test)]

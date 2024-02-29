@@ -32,7 +32,6 @@ http-signature-normalization-reqwest = { version = "0.11", default-features = fa
   "default-spawner",
   "sha-2",
 ] }
-jwt = { version = "0.16", features = ["openssl"] }
 josekit = { version = "0.8.5" }
 sha2 = "0.10"
 openssl = { version = "0.10" }
