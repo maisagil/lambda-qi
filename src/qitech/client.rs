@@ -5,8 +5,9 @@ use chrono::prelude::*;
 use josekit::jws::{JwsHeader, ES512};
 use josekit::jwt::JwtPayload;
 use openssl::pkey::{PKey, Private, Public};
-use reqwest::{header, Client, RequestBuilder};
+use reqwest::{header, Client, RequestBuilder, StatusCode};
 use secrecy::{ExposeSecret, Secret};
+use serde_json::Value;
 
 pub type Method = reqwest::Method;
 pub type Request = reqwest::Request;
@@ -105,7 +106,10 @@ impl QiTechClient {
         Ok((encoded_body, md5_hash))
     }
 
-    fn decode_body(pkey: PKey<Public>, jwt: &str) -> Result<serde_json::Value, ClientError> {
+    fn decode_body<T>(pkey: PKey<Public>, jwt: &str) -> Result<T, ClientError>
+    where
+        T: serde::de::DeserializeOwned + std::convert::From<serde_json::Map<String, Value>>,
+    {
         let verifier = ES512.verifier_from_pem(
             pkey.public_key_to_pem()
                 .expect("pkey should serializable into DER"),
@@ -218,13 +222,23 @@ impl QiTechClient {
 
     /// Authorize and execute a request.
     /// You should use this to make requests.
-    pub async fn execute_request(&self, request: RequestBuilder) -> Result<Response, ClientError> {
+    pub async fn execute_request<T>(
+        &self,
+        request: RequestBuilder,
+    ) -> Result<(T, StatusCode), ClientError>
+    where
+        T: serde::de::DeserializeOwned + std::convert::From<serde_json::Map<String, Value>>,
+    {
         let request = request.build()?;
         // return a authorized request
         let request = self.authenticate_request(request)?;
         // execute the request
-        Ok(self.http_client.execute(request).await?)
-        // decode_body
+        let response = self.http_client.execute(request).await?;
+        let status = response.status();
+        let body: EncodedBody = response.json().await?;
+        let body =
+            QiTechClient::decode_body::<T>(self.provider_public_key.clone(), &body.encoded_body)?;
+        Ok((body, status))
     }
 }
 
@@ -241,10 +255,12 @@ pub enum ClientError {
     MissingHeader,
     #[error("Invalid request headers")]
     InvalidRequestHeaders(#[from] reqwest::header::InvalidHeaderValue),
-    #[error("Client could not make the request")]
+    #[error("The request failed.")]
     ExecutionError(#[from] reqwest::Error),
     #[error("JWT sign or decode failed.")]
     JwtSignatureError(#[from] josekit::JoseError),
+    #[error("The provider response could not be parsed successfully or it's not valid json.")]
+    ResponseParse(String),
 }
 
 #[cfg(test)]
@@ -300,7 +316,8 @@ pub mod tests {
         let body = serde_json::from_str::<serde_json::Value>(TEST_JSON_BODY).unwrap();
         let (encoded_body, _) = QiTechClient::encode_body(pkey, &body).unwrap();
 
-        let decoded_body = QiTechClient::decode_body(pub_key, &encoded_body.encoded_body).unwrap();
+        let decoded_body =
+            QiTechClient::decode_body::<Value>(pub_key, &encoded_body.encoded_body).unwrap();
 
         assert_eq!(body, decoded_body);
     }
@@ -341,7 +358,8 @@ pub mod tests {
         let body = serde_json::from_str::<serde_json::Value>(TEST_JSON_BODY).unwrap();
 
         let (encoded_body, _) = QiTechClient::encode_body(pkey, &body).unwrap();
-        let decoded_body = QiTechClient::decode_body(pub_key, &encoded_body.encoded_body).unwrap();
+        let decoded_body =
+            QiTechClient::decode_body::<Value>(pub_key, &encoded_body.encoded_body).unwrap();
 
         assert_eq!(body, decoded_body);
     }

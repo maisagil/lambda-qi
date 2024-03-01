@@ -31,7 +31,7 @@ async fn main() -> Result<(), anyhow::Error> {
     };
     let provider = INSTANCE.get().unwrap();
     match provider.ask_for_balance(request).await {
-        Ok(response) => println!("{}", &response),
+        Ok(response) => println!("{:#?}", &response),
         Err(e) => println!("{}", e),
     };
     Ok(())

@@ -39,35 +39,41 @@ impl QiTechProvider {
 }
 
 impl QiTechProvider {
-    pub async fn ask_for_balance(&self, data: AskBalanceRequest) -> Result<String, ProviderError> {
+    pub async fn get_test(&self) -> Result<serde_json::Value, ProviderError> {
+        let client = &self.client;
+        let endpoint = "/test".to_string(); // format!("/test/{}", std::env!("QI_API_KEY"));
+        let request = client
+            .get_request(Method::GET, &endpoint)
+            .json(&serde_json::json!({"teste": "nbame"}));
+        let (body, _) = client.execute_request::<serde_json::Value>(request).await?;
+        Ok(body)
+    }
+
+    pub async fn post_test(&self) -> Result<serde_json::Value, ProviderError> {
+        let client = &self.client;
+        let endpoint = "/test".to_string(); // format!("/test/{}", std::env!("QI_API_KEY"));
+        let request = client
+            .get_request(Method::POST, &endpoint)
+            .json(&serde_json::json!({}));
+        let (body, _) = client.execute_request::<serde_json::Value>(request).await?;
+        Ok(body)
+    }
+
+    pub async fn ask_for_balance(
+        &self,
+        data: AskBalanceRequest,
+    ) -> Result<serde_json::Value, ProviderError> {
         let client = &self.client;
         let request = client
             .get_request(Method::POST, "/baas/v2/fgts/available_balance")
             .json(&data);
-        let response = client.execute_request(request).await?;
-
-        let body = match response.status() {
-            StatusCode::OK => {
-                let body = response.text().await;
-                body.map_err(|e| ProviderError::ResponseParse(e.to_string()))
-            }
-            StatusCode::UNAUTHORIZED | StatusCode::BAD_REQUEST => {
-                let body = response.text().await;
-                body.map_err(|e| ProviderError::ResponseParse(e.to_string()))
-            }
-            _ => response
-                .text()
-                .await
-                .map_err(|e| ProviderError::ResponseParse(e.to_string())),
-        }?;
+        let (body, _) = client.execute_request::<serde_json::Value>(request).await?;
         Ok(body)
     }
 }
 
 #[derive(thiserror::Error, Debug)]
 pub enum ProviderError {
-    #[error("The response could not be parsed successfully")]
-    ResponseParse(String),
     #[error(transparent)]
     Client(#[from] ClientError),
 }
@@ -86,22 +92,6 @@ mod tests {
 
     pub const TEST_ESKEY: &str = "LS0tLS1CRUdJTiBFQyBQUklWQVRFIEtFWS0tLS0tCk1IUUNBUUVFSUw2ZlQvTjBYOUdJTk03N3VkQ2UwSzV5RVR4Y2h4UGQ2c0R0enFaSXlsMTJvQWNHQlN1QkJBQUsKb1VRRFFnQUVNREdHbHRBRlFocXMyUUJ1aWRCcHQvWTg3RkhqVUlCZEFDQlJ0dFlpSWV1b2RObSt5a0tzcU9vYQo1OFVZc1VnWS84YTU3V2pZZ0IwNmNhWnE1NVdBNXc9PQotLS0tLUVORCBFQyBQUklWQVRFIEtFWS0tLS0tCg==";
     pub const TEST_PUBLIC_ESKEY: &str = "LS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS0KTUZZd0VBWUhLb1pJemowQ0FRWUZLNEVFQUFvRFFnQUVNREdHbHRBRlFocXMyUUJ1aWRCcHQvWTg3RkhqVUlCZApBQ0JSdHRZaUlldW9kTm0reWtLc3FPb2E1OFVZc1VnWS84YTU3V2pZZ0IwNmNhWnE1NVdBNXc9PQotLS0tLUVORCBQVUJMSUMgS0VZLS0tLS0K";
-
-    impl QiTechProvider {
-        pub async fn get_test(&self) -> Result<Response, ClientError> {
-            let client = &self.client;
-            let endpoint = "/test".to_string(); // format!("/test/{}", std::env!("QI_API_KEY"));
-            let request = client.get_request(Method::GET, &endpoint);
-            client.execute_request(request).await
-        }
-
-        pub async fn post_test(&self) -> Result<Response, ClientError> {
-            let client = &self.client;
-            let endpoint = "/test".to_string(); // format!("/test/{}", std::env!("QI_API_KEY"));
-            let request = client.get_request(Method::POST, &endpoint);
-            client.execute_request(request).await
-        }
-    }
 
     // impl wiremock::Match for SendEmailBodyMatcher {
     //     fn matches(&self, request: &Request) -> bool {
