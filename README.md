@@ -1,3 +1,11 @@
 # Simple Rust Experiment
 
-Trying to make a FGTS balance API with the QI-TECH in rust.
+Trying to make a FGTS client/provider for microservices in Rust.
+
+## TODO
+
+- [x] successful request.
+- [ ] decode qitech response.
+- [ ] improve request building interface. (considering rustify)
+- [ ] support multipart bodies.
+- [ ] implement all FGTS methods.
