@@ -3,6 +3,14 @@ name = "qi-client"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "qitech_provider"
+path = "src/lib.rs"
+
+[[bin]]
+name = "qitech_client_test"
+path = "src/main.rs"
+
 # Starting in Rust 1.62 you can use `cargo add` to add dependencies 
 # to your project.
 #

@@ -5,7 +5,7 @@ pub use models::*;
 
 use reqwest::StatusCode;
 
-use crate::configuration::QIClientSettings;
+pub use self::client::QIClientSettings;
 
 use self::client::{ClientError, Method, QiTechClient};
 

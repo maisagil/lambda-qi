@@ -1,17 +1,8 @@
-use secrecy::Secret;
+use qitech_provider::QIClientSettings;
 
 #[derive(serde::Deserialize, Clone, Debug)]
 pub struct Settings {
     pub qi_client: QIClientSettings,
-}
-
-#[derive(serde::Deserialize, Clone, Debug)]
-pub struct QIClientSettings {
-    pub base_url: String,
-    pub private_key: Secret<String>,
-    pub private_key_password: Secret<String>,
-    pub api_key: Secret<String>,
-    pub provider_pub_key: String,
 }
 
 pub fn get_configuration() -> Result<Settings, config::ConfigError> {

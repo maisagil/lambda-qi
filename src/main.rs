@@ -1,8 +1,7 @@
 pub mod configuration;
-mod qitech;
 
 use configuration::get_configuration;
-use qitech::{AskBalanceRequest, QiTechProvider};
+use qitech_provider::{AskBalanceRequest, QiTechProvider};
 use std::sync::OnceLock;
 use tracing_subscriber::filter::{EnvFilter, LevelFilter};
 

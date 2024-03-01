@@ -13,6 +13,15 @@ pub type Request = reqwest::Request;
 pub type Response = reqwest::Response;
 pub type Url = reqwest::Url;
 
+#[derive(serde::Deserialize, Clone, Debug)]
+pub struct QIClientSettings {
+    pub base_url: String,
+    pub private_key: Secret<String>,
+    pub private_key_password: Secret<String>,
+    pub api_key: Secret<String>,
+    pub provider_pub_key: String,
+}
+
 /// Client that makes authed requests to QiTech
 pub struct QiTechClient {
     http_client: Client,
@@ -151,7 +160,6 @@ impl QiTechClient {
                         .ok_or_else(|| ClientError::InvalidRequestBody)?,
                 )
                 .map_err(|_| ClientError::InvalidRequestBody)?;
-                dbg!(&json_body);
                 QiTechClient::encode_body(self.private_key.clone(), &json_body)?
             }
             None => {
