@@ -77,13 +77,17 @@ impl QiTechClient {
         let mut header = JwsHeader::new();
         header.set_token_type("JWT");
 
-        let payload: JwtPayload = JwtPayload::from_map(body.as_object().unwrap().clone()).unwrap();
+        let payload: JwtPayload = JwtPayload::from_map(
+            body.as_object()
+                .expect("request body should be a valid json object.")
+                .clone(),
+        )?;
 
-        let signer = ES512
-            .signer_from_der(pkey.private_key_to_der().unwrap())
-            .unwrap();
-        let jwt = josekit::jwt::encode_with_signer(&payload, &header, &signer).unwrap();
-        // let encoded_body_token = Token::new(header, body).sign_with_key(&pkey)?;
+        let signer = ES512.signer_from_der(
+            pkey.private_key_to_der()
+                .expect("pkey should serializable into DER"),
+        )?;
+        let jwt = josekit::jwt::encode_with_signer(&payload, &header, &signer)?;
 
         let md5_hash = format!("{:x}", md5::compute(jwt.as_str()));
 
@@ -92,12 +96,13 @@ impl QiTechClient {
         Ok((encoded_body, md5_hash))
     }
 
-    fn decode_body(pkey: PKey<Public>, token_str: &str) -> Result<serde_json::Value, ClientError> {
-        // let pkey = QiTechClient::get_digest(pkey);
-        //
-        // let token: Token<Header, serde_json::Value, Verified> = token_str.verify_with_key(&pkey)?;
-        // Ok(token.claims().clone())
-        todo!()
+    fn decode_body(pkey: PKey<Public>, jwt: &str) -> Result<serde_json::Value, ClientError> {
+        let verifier = ES512.verifier_from_pem(
+            pkey.public_key_to_pem()
+                .expect("pkey should serializable into DER"),
+        )?;
+        let (payload, _) = josekit::jwt::decode_with_verifier(jwt, &verifier)?; // Ok(token.claims().clone())
+        Ok(payload.as_ref().clone().into())
     }
 
     fn encode_headers(
@@ -124,10 +129,11 @@ impl QiTechClient {
         payload.set_claim("iat", Some(epoch_timestamp.into()))?;
         payload.set_claim("signature", Some(string_to_sign.into()))?;
 
-        let signer = ES512
-            .signer_from_der(pkey.private_key_to_der().unwrap())
-            .unwrap();
-        let jwt = josekit::jwt::encode_with_signer(&payload, &header, &signer).unwrap();
+        let signer = ES512.signer_from_der(
+            pkey.private_key_to_der()
+                .expect("pkey should serializable into DER"),
+        )?;
+        let jwt = josekit::jwt::encode_with_signer(&payload, &header, &signer)?;
 
         let authorization_header = format!("QIT {}:{}", api_key.expose_secret(), jwt.as_str());
         Ok(authorization_header)
@@ -140,14 +146,18 @@ impl QiTechClient {
 
         let (encoded_body, md5_hash) = match request_body {
             Some(body) => {
-                let body: serde_json::Value = serde_json::from_slice(
+                let json_body: serde_json::Value = serde_json::from_slice(
                     body.as_bytes()
                         .ok_or_else(|| ClientError::InvalidRequestBody)?,
                 )
                 .map_err(|_| ClientError::InvalidRequestBody)?;
-                QiTechClient::encode_body(self.private_key.clone(), &body)?
+                dbg!(&json_body);
+                QiTechClient::encode_body(self.private_key.clone(), &json_body)?
             }
-            None => todo!(),
+            None => {
+                let json_body = serde_json::json!({});
+                QiTechClient::encode_body(self.private_key.clone(), &json_body)?
+            }
         };
 
         let content_type = request_headers
@@ -177,10 +187,10 @@ impl QiTechClient {
         let api_key = self.api_key.expose_secret().to_string().parse()?;
         request_headers.insert("api-client-key", api_key);
 
-        let string_body = serde_json::to_vec(&encoded_body).unwrap();
+        let encoded_body = serde_json::to_vec(&encoded_body).expect("Body should serializable");
         let _ = new_request
             .body_mut()
-            .insert(reqwest::Body::from(string_body));
+            .insert(reqwest::Body::from(encoded_body));
 
         Ok(new_request)
     }
@@ -213,24 +223,6 @@ impl QiTechClient {
 #[derive(serde::Deserialize, serde::Serialize, Debug)]
 struct EncodedBody {
     encoded_body: String,
-}
-
-/// Claims for JWT token generation, in the format that the QiTech wants.
-#[derive(serde::Serialize)]
-struct QiClaims {
-    sub: String,
-    iat: i64,
-    signature: String,
-}
-
-impl QiClaims {
-    fn new(sub: String, iat: i64, signature: String) -> Self {
-        Self {
-            sub,
-            iat,
-            signature,
-        }
-    }
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -353,9 +345,10 @@ pub mod tests {
             Secret::new(TEST_ESKEY.into()),
             TEST_PUBLIC_ESKEY.into(),
         );
+        let body = serde_json::from_str::<serde_json::Value>(TEST_JSON_BODY).unwrap();
         let request = client
             .get_request(Method::GET, TEST_ENDPOINT)
-            .json(TEST_JSON_BODY)
+            .json(&body)
             .build()
             .unwrap();
         let authorized_request = client.authenticate_request(request).unwrap();
@@ -366,6 +359,7 @@ pub mod tests {
         .unwrap();
         assert!(authorized_request.headers().get("API-CLIENT-KEY").is_some());
         assert!(authorized_request.headers().get("AUTHORIZATION").is_some());
+        assert!(authorized_request.body().is_some());
     }
 
     #[test]
@@ -383,5 +377,6 @@ pub mod tests {
 
         assert!(authorized_request.headers().get("API-CLIENT-KEY").is_some());
         assert!(authorized_request.headers().get("AUTHORIZATION").is_some());
+        assert!(authorized_request.body().is_some());
     }
 }
