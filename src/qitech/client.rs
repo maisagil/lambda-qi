@@ -108,14 +108,15 @@ impl QiTechClient {
 
     fn decode_body<T>(pkey: PKey<Public>, jwt: &str) -> Result<T, ClientError>
     where
-        T: serde::de::DeserializeOwned + std::convert::From<serde_json::Map<String, Value>>,
+        T: serde::de::DeserializeOwned,
     {
         let verifier = ES512.verifier_from_pem(
             pkey.public_key_to_pem()
                 .expect("pkey should serializable into DER"),
         )?;
         let (payload, _) = josekit::jwt::decode_with_verifier(jwt, &verifier)?; // Ok(token.claims().clone())
-        Ok(payload.as_ref().clone().into())
+        serde_json::from_value::<T>(serde_json::Value::Object(payload.as_ref().clone()))
+            .map_err(|_| ClientError::ResponseParse("parsing for decoded jwt failed".to_string()))
     }
 
     fn encode_headers(
@@ -227,7 +228,7 @@ impl QiTechClient {
         request: RequestBuilder,
     ) -> Result<(T, StatusCode), ClientError>
     where
-        T: serde::de::DeserializeOwned + std::convert::From<serde_json::Map<String, Value>>,
+        T: serde::de::DeserializeOwned,
     {
         let request = request.build()?;
         // return a authorized request

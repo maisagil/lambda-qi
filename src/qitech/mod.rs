@@ -62,12 +62,12 @@ impl QiTechProvider {
     pub async fn ask_for_balance(
         &self,
         data: AskBalanceRequest,
-    ) -> Result<serde_json::Value, ProviderError> {
+    ) -> Result<AskBalanceResponse, ProviderError> {
         let client = &self.client;
         let request = client
             .get_request(Method::POST, "/baas/v2/fgts/available_balance")
             .json(&data);
-        let (body, _) = client.execute_request::<serde_json::Value>(request).await?;
+        let (body, _) = client.execute_request(request).await?;
         Ok(body)
     }
 }
