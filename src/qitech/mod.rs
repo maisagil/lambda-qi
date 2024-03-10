@@ -130,21 +130,22 @@ mod tests {
 
     #[tokio::test]
     async fn ask_for_balance_returns_200() {
+        let response_body = serde_json::json!({
+            "available_balance_key": "7521981f-0b06-43d2-9a75-d3a1f215fbbf",
+            "document_number": "06568225037",
+            "status": "pending",
+            "status_events": [{
+                "event_datetime": "2022-12-26T13:36:16",
+                "status": "pending"
+            }]
+        });
         let body = r#"{"document_number": "05577889944"}"#;
         let body = serde_json::from_str::<AskBalanceRequest>(body).unwrap();
         let mock_server = MockServer::start().await;
         let provider = create_provider(mock_server.uri());
         Mock::given(method("POST"))
             .and(path("/baas/v2/fgts/available_balance"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "available_balance_key": "7521981f-0b06-43d2-9a75-d3a1f215fbbf",
-                "document_number": "06568225037",
-                "status": "pending",
-                "status_events": [{
-                    "event_datetime": "2022-12-26T13:36:16",
-                    "status": "pending"
-                }]
-            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(response_body))
             .expect(1)
             .mount(&mock_server)
             .await;
